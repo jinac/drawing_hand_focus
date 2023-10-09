@@ -133,11 +133,14 @@ def main():
                         help='moving window average size')
     parser.add_argument('--debug', default=False, action='store_true',
                         help='')
+    parser.add_argument('-s', '--show', default=False, action='store_True',
+                        help='')
     args = parser.parse_args()
 
     cam = args.cam
     video_filepath = args.video
     debug_flag = args.debug
+    display_flag = args.show
     out_video_filepath = args.out
     moving_avg_window_size = args.window
 
@@ -148,6 +151,7 @@ def main():
     fps = cap.get(cv2.CAP_PROP_FPS)
 
     # Init camera output
+    out = None
     out_resolution = (w, h)
     if debug_flag:
         out_resolution = (w*2, h)
@@ -197,12 +201,17 @@ def main():
             out_frame = np.concatenate((disp_frame, cropped_frame), axis=1)
         else:
             out_frame = cropped_frame
-        # cv2.imshow('frame', out_frame)
-        out.write(out_frame)
-            
+        
+        if display_flag:
+            cv2.imshow('', out_frame)
+        if out is not None:
+            out.write(out_frame)
+
     cap.release()
-    out.release()
-    # cv2.destroyAllWindows()
+    if out is not None:
+        out.release()
+    if display_flag:
+        cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     main()
