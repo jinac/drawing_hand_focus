@@ -1,8 +1,10 @@
 import argparse
+import sys
 
 import cv2
 import mediapipe as mp
 import numpy as np
+
 
 def get_hand_data(landmarks, w, h):
     hand_lms = np.array([(lm.x*w, lm.y*h, lm.z) for lm in landmarks])
@@ -18,9 +20,9 @@ def get_hand_data(landmarks, w, h):
     return hand_box, hand_position
 
 class HandTracker():
-    def __init__(self, w, h, n=5):
+    def __init__(self, w, h, moving_avg_window_size=5):
         self.pos_arr = []
-        self.max_arr_len = n
+        self.max_arr_len = moving_avg_window_size
         self.last_pos = None
         self.last_box = None
         self.frame_w = w
@@ -86,6 +88,7 @@ class FrameCropper():
         # cv2.putText(new_frame, txt, (100,100), self.font, 3, (0, 255, 0), 2, cv2.LINE_AA)
         return new_frame
 
+
 def process_results(results, w, h):
     out = []
     
@@ -104,29 +107,54 @@ def filter_closest(cur_frame_hands_data, prev_hand_position):
     closest_idx = np.linalg.norm(pos_arr - prev_hand_position, axis=1).argmin()
     return cur_frame_hands_data[closest_idx]
 
-def main():
-    # parser = argparse.ArgumentParser(description='')
-    # parser.add_argument('-c', '--cam',
-    #                     help='')
-    # parser.add_argument('-v', '--video',
-    #                     help='')
-    # args = parser.parse_args()
+def open_input_stream(cam_id, video_filepath):
+    use_cam = cam_id is not None
+    use_video = video_filepath is not None
+    if use_cam == use_video:
+        if use_cam:
+            sys.exit("Cannot open both camera and video stream. Pick one.")
+        else:
+            sys.exit("No input camera or video specified")
+    else:
+        if use_cam:
+            return cv2.VideoCapture(cam_id)
+        else:
+            return cv2.VideoCapture(video_filepath)
 
-    video_filepath = 'test2.mp4'
-    out_video_filepath = 'test2_out_filter1.mp4'
-    debug_flag = False
-    cap = cv2.VideoCapture(video_filepath)
+def main():
+    parser = argparse.ArgumentParser(description='Create camera stream with automated hand croppinmg')
+    parser.add_argument('-c', '--cam',
+                        help='')
+    parser.add_argument('-v', '--video',
+                        help='')
+    parser.add_argument('-o', '--out',
+                        help='')
+    parser.add_argument('-w', '--window', default=10, type=int,
+                        help='moving window average size')
+    parser.add_argument('--debug', default=False, action='store_true',
+                        help='')
+    args = parser.parse_args()
+
+    cam = args.cam
+    video_filepath = args.video
+    debug_flag = args.debug
+    out_video_filepath = args.out
+    moving_avg_window_size = args.window
+
+    # Init camera input
+    cap = open_input_stream(cam, video_filepath)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
 
+    # Init camera output
     out_resolution = (w, h)
     if debug_flag:
         out_resolution = (w*2, h)
     out = cv2.VideoWriter(out_video_filepath, cv2.VideoWriter_fourcc(*'mp4v'), fps, out_resolution)
 
     font = cv2.FONT_HERSHEY_SIMPLEX
-    tracker = HandTracker(w, h, n=10)
+    tracker = HandTracker(w=w, h=h, moving_avg_window_size=moving_avg_window_size)
     mpHands = mp.solutions.hands
     hands = mpHands.Hands(model_complexity=0,
                           static_image_mode=False)
@@ -138,9 +166,9 @@ def main():
         if not ret:
             break
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
         if debug_flag:
             disp_frame = frame.copy()
-        # cropped_frame = np.zeros((h, w, 3), dtype='uint8')
         cropped_frame = frame.copy()
         results = hands.process(rgb_frame)
         data = process_results(results, w, h)
@@ -169,10 +197,12 @@ def main():
             out_frame = np.concatenate((disp_frame, cropped_frame), axis=1)
         else:
             out_frame = cropped_frame
+        # cv2.imshow('frame', out_frame)
         out.write(out_frame)
             
     cap.release()
     out.release()
+    # cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     main()
