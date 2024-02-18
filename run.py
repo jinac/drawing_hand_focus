@@ -70,7 +70,6 @@ class FrameCropper():
         self.crop_w, self.crop_h = self.calc_crop_frame(crop_dec, offset)
         self.hand_x, self.hand_y = offset
 
-        # self.font = cv2.FONT_HERSHEY_SIMPLEX
         
     def calc_crop_frame(self, crop_dec, offset):
         crop_w = np.rint(crop_dec * self.frame_w).astype('int')
@@ -133,7 +132,13 @@ def main():
                         help='moving window average size')
     parser.add_argument('--debug', default=False, action='store_true',
                         help='')
-    parser.add_argument('-s', '--show', default=False, action='store_True',
+    parser.add_argument('-s', '--show', default=False, action='store_true',
+                        help='')
+    parser.add_argument('--start_threshold', default=10, type=int,
+                        help='')
+    parser.add_argument('--loss_threshold', default=20, type=int,
+                        help='')
+    parser.add_argument('-r', '--res', default=0.3, type=float,
                         help='')
     args = parser.parse_args()
 
@@ -143,6 +148,9 @@ def main():
     display_flag = args.show
     out_video_filepath = args.out
     moving_avg_window_size = args.window
+    start_threshold = args.start_threshold
+    loss_threshold = args.loss_threshold
+    crop_dec = args.res
 
     # Init camera input
     cap = open_input_stream(cam, video_filepath)
@@ -158,12 +166,12 @@ def main():
     out = cv2.VideoWriter(out_video_filepath, cv2.VideoWriter_fourcc(*'mp4v'), fps, out_resolution)
 
     font = cv2.FONT_HERSHEY_SIMPLEX
-    tracker = HandTracker(w=w, h=h, moving_avg_window_size=moving_avg_window_size)
+    tracker = HandTracker(w, h, moving_avg_window_size)
     mpHands = mp.solutions.hands
     hands = mpHands.Hands(model_complexity=0,
                           static_image_mode=False)
-    cropper = FrameCropper(w, h, crop_dec = 0.3)
-    crop_state = State(start_threshold=10, loss_threshold=20)
+    cropper = FrameCropper(w, h, crop_dec)
+    crop_state = State(start_threshold, loss_threshold)
 
     while(cap.isOpened()):
         ret, frame = cap.read()
@@ -171,8 +179,8 @@ def main():
             break
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        if debug_flag:
-            disp_frame = frame.copy()
+        # if debug_flag:
+        #     disp_frame = frame.copy()
         cropped_frame = frame.copy()
         results = hands.process(rgb_frame)
         data = process_results(results, w, h)
@@ -189,16 +197,16 @@ def main():
             crop_on = crop_state.get_crop_state(False)
         
         if crop_on:
-            hand_box = crop_data[2]
-            if debug_flag:
-                cv2.rectangle(disp_frame, hand_box[0, :], hand_box[1, :], (255, 255, 0), 3)
-                cv2.putText(disp_frame, str(idx), (100,100), font, 3, (255, 255, 0), 2, cv2.LINE_AA)
-
             hand_pos = crop_data[3]
             cropped_frame = cropper.crop_frame(frame, hand_pos)
+            hand_box = crop_data[2]
+            if debug_flag:
+                cv2.rectangle(frame, hand_box[0, :], hand_box[1, :], (255, 255, 0), 3)
+                cv2.putText(frame, str(idx), (100,100), font, 3, (255, 255, 0), 2, cv2.LINE_AA)
+
 
         if debug_flag:
-            out_frame = np.concatenate((disp_frame, cropped_frame), axis=1)
+            out_frame = np.concatenate((frame, cropped_frame), axis=1)
         else:
             out_frame = cropped_frame
         
