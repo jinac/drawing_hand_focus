@@ -6,6 +6,50 @@ import mediapipe as mp
 import numpy as np
 
 
+def smoothing_factor(t_e, cutoff):
+    r = 2 * np.pi * cutoff * t_e
+    return r / (r + 1)
+
+
+def exponential_smoothing(a, x, x_prev):
+    return a * x + (1 - a) * x_prev
+
+
+class OneEuroFilter:
+    def __init__(self, t0, x0, dx0=0.0, min_cutoff=1.0, beta=0.0,
+                 d_cutoff=1.0):
+        """Initialize the one euro filter."""
+        # The parameters.
+        self.min_cutoff = np.float(min_cutoff)
+        self.beta = np.float(beta)
+        self.d_cutoff = np.float(d_cutoff)
+        # Previous values.
+        self.x_prev = np.array(x0, dtype=np.float)
+        self.dx_prev = np.array(dx0, dtype=np.float)
+        self.t_prev = np.float(t0)
+
+    def __call__(self, t, x):
+        """Compute the filtered signal."""
+        t_e = t - self.t_prev
+
+        # The filtered derivative of the signal.
+        a_d = smoothing_factor(t_e, self.d_cutoff)
+        dx = (x - self.x_prev) / t_e
+        dx_hat = exponential_smoothing(a_d, dx, self.dx_prev)
+
+        # The filtered signal.
+        cutoff = self.min_cutoff + self.beta * abs(dx_hat)
+        a = smoothing_factor(t_e, cutoff)
+        x_hat = exponential_smoothing(a, x, self.x_prev)
+
+        # Memorize the previous values.
+        self.x_prev = x_hat
+        self.dx_prev = dx_hat
+        self.t_prev = t
+
+        return x_hat
+
+
 def get_hand_data(landmarks, w, h):
     hand_lms = np.array([(lm.x*w, lm.y*h, lm.z) for lm in landmarks])
     
@@ -14,7 +58,7 @@ def get_hand_data(landmarks, w, h):
     hand_box[:, 0] = np.clip(hand_box[:, 0], 0.0, w)
     hand_box[:, 1] = np.clip(hand_box[:, 1], 0.0, h)
     hand_box = np.rint(hand_box).astype('int')
-
+    
     hand_position = hand_lms.mean(axis=0)
     
     return hand_box, hand_position
@@ -22,6 +66,7 @@ def get_hand_data(landmarks, w, h):
 class HandTracker():
     def __init__(self, w, h, moving_avg_window_size=5):
         self.pos_arr = []
+        self.filter = OneEuroFilter(0, [0., 0.], [0., 0.])
         self.max_arr_len = moving_avg_window_size
         self.last_pos = None
         self.last_box = None
@@ -29,17 +74,19 @@ class HandTracker():
         self.frame_h = h
         self.diff_frame = None
         
-    def update(self, hands_results):
+    def update(self, hands_results, t=0):
         hand_box, hand_position = get_hand_data(hands_results, self.frame_w, self.frame_h)
+        hand_position = self.filter(t, hand_position)
         if self.last_pos is not None:
             self.diff_frame = np.linalg.norm(hand_position - self.last_pos)
         self.last_box = hand_box
         self.last_pos = hand_position
-        self.pos_arr.append(hand_position)
-        while (len(self.pos_arr) > self.max_arr_len):
-            _ = self.pos_arr.pop(0)
-            
-        return (self.diff_frame, self.last_pos, self.last_box, np.mean(self.pos_arr, axis=0))
+        # self.pos_arr.append(hand_position)
+        # while (len(self.pos_arr) > self.max_arr_len):
+        #     _ = self.pos_arr.pop(0)
+        
+        return (self.diff_frame, self.last_pos, self.last_box, hand_position)
+        # return (self.diff_frame, self.last_pos, self.last_box, np.mean(self.pos_arr, axis=0))
 
 class State():
     def __init__(self, start_threshold=5, loss_threshold=10):
@@ -175,6 +222,7 @@ def main():
 
     while(cap.isOpened()):
         ret, frame = cap.read()
+        t = cap.get(cv2.CAP_PROP_POS_MSEC)
         if not ret:
             break
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -192,7 +240,7 @@ def main():
             else:
                 data = data[0]
             ldmks, hand_loc, idx = data
-            crop_data = tracker.update(ldmks)
+            crop_data = tracker.update(ldmks, t)
         else:
             crop_on = crop_state.get_crop_state(False)
         
